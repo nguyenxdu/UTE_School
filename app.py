@@ -1,6 +1,7 @@
+# -*- coding: utf-8 -*-
 import os
 import subprocess
-import json as _json_mod
+import json
 import tempfile
 from functools import wraps
 from datetime import datetime
@@ -8,10 +9,9 @@ from flask import Flask, request, jsonify, session, send_file
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from database import get_db, init_db
-import subprocess
-import json
-import tempfile
-from flask import send_file
+import google.generativeai as genai
+from pypdf import PdfReader
+from docx import Document
 
 app = Flask(__name__)
 app.secret_key = "secret_key_123"
@@ -21,8 +21,22 @@ app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = False
 
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyBXKIdqFfH3OBbfhGUuiF2V0BxfkcgK4IM").strip()
+GEMINI_MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
+_GEMINI_CONFIGURED = False
+
 UPLOAD_FOLDER = "uploads"
+UPLOAD_FOLDER = os.path.join(app.root_path, UPLOAD_FOLDER)
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+
+def _resolve_upload_path(stored_path):
+    if not stored_path:
+        return ""
+    normalized = str(stored_path).replace("\\", "/")
+    if os.path.isabs(normalized):
+        return normalized
+    return os.path.join(app.root_path, normalized)
 
 init_db()
 
@@ -38,6 +52,101 @@ def ok(message="Thành công", data=None, status=200):
 
 def fail(message="Có lỗi xảy ra", status=400):
     return jsonify({"success": False, "message": message, "data": {}}), status
+
+
+def _configure_gemini():
+    global _GEMINI_CONFIGURED
+    if _GEMINI_CONFIGURED:
+        return True
+    if not GEMINI_API_KEY:
+        return False
+    genai.configure(api_key=GEMINI_API_KEY)
+    _GEMINI_CONFIGURED = True
+    return True
+
+
+def _read_pdf_text(file_path):
+    reader = PdfReader(file_path)
+    chunks = []
+    for page in reader.pages:
+        text = page.extract_text() or ""
+        if text.strip():
+            chunks.append(text)
+    return "\n".join(chunks)
+
+
+def _read_docx_text(file_path):
+    doc = Document(file_path)
+    chunks = [para.text for para in doc.paragraphs if para.text and para.text.strip()]
+    return "\n".join(chunks)
+
+
+def _read_text_from_file(file_path):
+    file_path = _resolve_upload_path(file_path)
+    if not file_path or not os.path.exists(file_path):
+        return ""
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext == ".pdf":
+        return _read_pdf_text(file_path)
+    if ext == ".docx":
+        return _read_docx_text(file_path)
+    if ext == ".txt":
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+            return f.read()
+    return ""
+
+
+def _pick_latest_upload_paths(conn, dang_ky_id, loai_file_list):
+    placeholders = ",".join(["?"] * len(loai_file_list))
+    rows = conn.execute(
+        f"""
+        SELECT loai_file, file_path
+        FROM nop_bai
+        WHERE dang_ky_id = ? AND loai_file IN ({placeholders})
+        ORDER BY id DESC
+        """,
+        [dang_ky_id, *loai_file_list],
+    ).fetchall()
+    seen = set()
+    paths = []
+    for row in rows:
+        path = row["file_path"]
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        paths.append(path)
+    return paths
+
+
+def _collect_summary_content(conn, dang_ky_id):
+    paths = _pick_latest_upload_paths(conn, dang_ky_id, ["kltn_bai_pdf", "kltn_bai_word", "kltn_bai"])
+    if not paths:
+        return "", []
+    texts = []
+    used_paths = []
+    for path in paths:
+        text = _read_text_from_file(path)
+        if text.strip():
+            texts.append(text)
+            used_paths.append(path)
+    return "\n\n".join(texts).strip(), used_paths
+
+
+def _build_gemini_summary_prompt(content):
+    return f"""
+Bạn là một trợ lý học thuật cao cấp. Hãy tóm tắt nội dung báo cáo thực tập/đồ án sau đây để giảng viên phản biện có cái nhìn nhanh nhất.
+
+Yêu cầu tóm tắt theo các mục:
+1. Tên đề tài & Mục tiêu chính.
+2. Các công nghệ/phương pháp sử dụng.
+3. Kết quả đạt được (Sản phẩm/Số liệu).
+4. Nhận định nhanh: Ưu điểm và những điểm cần chất vấn thêm (nếu có).
+
+Nội dung báo cáo:
+---
+{content}
+---
+""".strip()
 
 
 def map_role(role):
@@ -210,7 +319,10 @@ def _can_score_kltn(conn, dang_ky_id, gv_id, vai_tro):
             """,
             (dang_ky_id,),
         ).fetchone()
-        return row and str(row["file_path"]) == str(gv_id)
+        if not row:
+            return False
+        pb_ids = [int(x) for x in str(row["file_path"]).split("|") if x.strip().isdigit()]
+        return gv_id in pb_ids
     hd = _hoi_dong_ids(conn, dang_ky_id)
     if not hd:
         return False
@@ -1373,14 +1485,84 @@ def upload():
     save_path = os.path.join(target_dir, f"{int(datetime.now().timestamp())}_{safe_name}")
     f.save(save_path)
 
+    stored_path = os.path.relpath(save_path, app.root_path).replace("\\", "/")
+
     conn = get_db()
     conn.execute(
         "INSERT INTO nop_bai (dang_ky_id, loai_file, file_path) VALUES (?, ?, ?)",
-        (dang_ky_id, loai, save_path.replace("\\", "/")),
+        (dang_ky_id, loai, stored_path),
     )
     conn.commit()
     conn.close()
-    return ok("Upload file thành công", {"file_path": save_path.replace("\\", "/")})
+    return ok("Upload file thành công", {"file_path": stored_path})
+
+
+@app.route("/api/gv/summarize", methods=["POST"])
+@role_required("GV", "TBM")
+def summarize_report():
+    data = request.json or {}
+    dang_ky_id = data.get("dang_ky_id")
+    content = (data.get("content") or "").strip()
+
+    if not dang_ky_id and not content:
+        return fail("Thiếu dang_ky_id hoặc nội dung để tóm tắt", 400)
+
+    if not content and dang_ky_id:
+        conn = get_db()
+        try:
+            reg = conn.execute(
+                "SELECT id, gv_id, loai FROM dang_ky WHERE id = ?",
+                (dang_ky_id,),
+            ).fetchone()
+            if not reg or reg["loai"] != "KLTN":
+                return fail("Chỉ hỗ trợ tóm tắt hồ sơ KLTN", 400)
+
+            role_hdr = str(request.headers.get("X-User-Role") or session.get("role") or "").upper()
+            if role_hdr == "GV":
+                current_user = get_current_user(conn)
+                if not current_user:
+                    return fail("Không tìm thấy người dùng", 401)
+
+                can_access = reg["gv_id"] == current_user["id"]
+                if not can_access:
+                    pb_row = conn.execute(
+                        "SELECT file_path FROM nop_bai WHERE dang_ky_id = ? AND loai_file = 'phanbien_gv' ORDER BY id DESC LIMIT 1",
+                        (dang_ky_id,),
+                    ).fetchone()
+                    if pb_row:
+                        pb_ids = [int(x) for x in str(pb_row["file_path"]).split("|") if x.strip().isdigit()]
+                        if current_user["id"] in pb_ids:
+                            can_access = True
+                    else:
+                        hd = _hoi_dong_ids(conn, dang_ky_id)
+                        if hd and (current_user["id"] == hd["ct"] or current_user["id"] == hd["tk"] or current_user["id"] in hd["tv"]):
+                            can_access = True
+
+                if not can_access:
+                    return fail("Bạn không có quyền tóm tắt hồ sơ này", 403)
+
+            content, used_paths = _collect_summary_content(conn, dang_ky_id)
+        finally:
+            conn.close()
+        if not content:
+            return fail("Không tìm thấy nội dung văn bản từ file đã nộp", 400)
+    else:
+        used_paths = []
+
+    if not _configure_gemini():
+        return fail("Thiếu GEMINI_API_KEY trong biến môi trường", 500)
+
+    try:
+        model = genai.GenerativeModel(GEMINI_MODEL_NAME)
+        prompt = _build_gemini_summary_prompt(content)
+        response = model.generate_content(prompt)
+        return ok("Tóm tắt thành công", {
+            "summary": response.text,
+            "used_files": used_paths,
+            "model": GEMINI_MODEL_NAME,
+        })
+    except Exception as e:
+        return fail(f"Lỗi kết nối Gemini: {str(e)}", 500)
 
 
 @app.route("/api/thong-ke", methods=["GET"])
@@ -1417,18 +1599,19 @@ def luu_bien_ban():
     filename = data.get('filename', 'bien_ban.docx')
     if not file_b64 or not dang_ky_id:
         return fail("Thiếu dữ liệu", 400)
-    target_dir = os.path.join('uploads', 'bien_ban_tk', str(ma_sv))
+    target_dir = os.path.join(app.root_path, 'uploads', 'bien_ban_tk', str(ma_sv))
     os.makedirs(target_dir, exist_ok=True)
     save_path = os.path.join(target_dir, f"{int(datetime.now().timestamp())}_{secure_filename(filename)}")
     with open(save_path, 'wb') as f:
         f.write(base64.b64decode(file_b64))
+    stored_path = os.path.relpath(save_path, app.root_path).replace("\\", "/")
     conn = get_db()
     conn.execute("DELETE FROM nop_bai WHERE dang_ky_id = ? AND loai_file = 'bien_ban_tk'", (dang_ky_id,))
     conn.execute("INSERT INTO nop_bai (dang_ky_id, loai_file, file_path) VALUES (?, 'bien_ban_tk', ?)",
-                 (dang_ky_id, save_path.replace("\\", "/")))
+                 (dang_ky_id, stored_path))
     conn.commit()
     conn.close()
-    return ok("Lưu biên bản thành công", {"file_path": save_path.replace("\\", "/")})
+    return ok("Lưu biên bản thành công", {"file_path": stored_path})
 
 @app.route('/uploads/<path:filename>')
 def download_file(filename):
@@ -1449,7 +1632,7 @@ def xuat_bien_ban_docx():
     script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gen_bien_ban.js')
     try:
         result = subprocess.run(
-            ['node', script_path, _json_mod.dumps(data, ensure_ascii=False), out_path],
+            ['node', script_path, json.dumps(data, ensure_ascii=False), out_path],
             capture_output=True, text=True, timeout=30
         )
         if result.returncode != 0 or not os.path.exists(out_path):

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import sqlite3
 
 DB_PATH = "db.sqlite"
@@ -121,4 +122,4 @@ def init_db():
     migrate_db(conn)
     conn.commit()
     conn.close()
-    print("✅ Database initialized!")
+    print("[OK] Database initialized!")

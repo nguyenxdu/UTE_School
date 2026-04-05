@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import os
 import csv
 import urllib.request
@@ -159,7 +160,7 @@ def run_import():
         with urllib.request.urlopen(req) as response:
             lines = [line.decode('utf-8-sig') for line in response.readlines()]
     except Exception as e:
-        print("❌ Lỗi khi tải Google Sheets:", e)
+        print("[ERROR] Lỗi khi tải Google Sheets:", e)
         return
 
     reader = csv.DictReader(lines)
@@ -244,11 +245,11 @@ def run_import():
     conn.commit()
     conn.close()
 
-    print(f"✅ Đã import thành công {len(users)} tài khoản.")
-    print("✅ Đã cập nhật chi tiết chuyên ngành (Ví dụ: QLCN, Mô phỏng, Sản xuất...)")
-    print(f"✅ Đã tạo {len(NEW_DOTS)} đợt đăng ký (chung Đại trà & CLC, theo ngành).")
-    print("✅ Đã cấp slot: mỗi (GV, đợt) có 2 pool — Đại trà (QUOTA_LEGACY.DaiTra) & CLC (QUOTA_LEGACY.CLC).")
-    print("🚀 Hãy chạy lệnh 'python app.py' để thưởng thức hệ thống mới!")
+    print(f"[OK] Đã import thành công {len(users)} tài khoản.")
+    print("[OK] Đã cập nhật chi tiết chuyên ngành (Ví dụ: QLCN, Mô phỏng, Sản xuất...)")
+    print(f"[OK] Đã tạo {len(NEW_DOTS)} đợt đăng ký (chung Đại trà & CLC, theo ngành).")
+    print("[OK] Đã cấp slot: mỗi (GV, đợt) có 2 pool — Đại trà (QUOTA_LEGACY.DaiTra) & CLC (QUOTA_LEGACY.CLC).")
+    print("[DONE] Hãy chạy lệnh 'python app.py' để thưởng thức hệ thống mới!")
 
 if __name__ == "__main__":
     run_import()

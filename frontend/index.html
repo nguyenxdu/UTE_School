@@ -1596,6 +1596,9 @@ function viewKLTNDetail(id) {
 
     <div class="kltn-section">
       <div class="kltn-sec-title">Tài liệu & Hồ sơ</div>
+      <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+        <button class="btn btn-primary btn-sm" data-summary-btn="${k.id}" onclick="summarizeKLTNReport('${k.id}', this)">🤖 Tóm tắt AI</button>
+      </div>
       <div class="kltn-grid-files">
         <div class="kltn-row" style="margin:0; align-items: center;"><span class="kltn-label" style="min-width: 90px;">File Word:</span><span class="kltn-value">${linkFile(k.fileBaiWord, '📄 Tải Word')}</span></div>
         <div class="kltn-row" style="margin:0; align-items: center;"><span class="kltn-label" style="min-width: 90px;">File PDF:</span><span class="kltn-value">${linkFile(k.fileBai, '📕 Tải PDF')}</span></div>
@@ -2202,6 +2205,7 @@ function renderPhanBien() {
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
           <div style="flex:1;min-width:200px"><div style="font-weight:700;cursor:pointer;color:var(--primary)" onclick="viewKLTNDetail('${k.id}')">${escapeHtml(k.tenDeTai)}</div><div style="font-size:12px;color:var(--text3)">SV: ${escapeHtml(k.svEmail)}</div></div>
           <div>
+            <button class="btn btn-ghost btn-sm" data-summary-btn="${k.id}" onclick="summarizeKLTNReport('${k.id}', this)">🤖 Tóm tắt AI</button>
             <button class="btn btn-ghost btn-sm" onclick="navigateTo('nhapDiem')">Mở chấm điểm</button>
             <button class="btn btn-sm btn-ghost" style="margin-left:6px" onclick="viewKLTNDetail('${k.id}')">Chi tiết</button>
           </div>
@@ -2392,6 +2396,53 @@ async function downloadBienBanThuKy() {
     btn.disabled = false; loading.style.display = 'none';
 }
 }
+
+async function summarizeKLTNReport(kltnId, buttonEl) {
+  const k = DB.kltnList.find((x) => x.id === kltnId);
+  if (!k) {
+    toast('Không tìm thấy đề tài KLTN', 'error');
+    return;
+  }
+
+  const btn = buttonEl || document.querySelector(`[data-summary-btn="${kltnId}"]`);
+  if (btn) btn.disabled = true;
+
+  try {
+    const res = await apiRequest('/api/gv/summarize', {
+      method: 'POST',
+      body: JSON.stringify({ dang_ky_id: k.dangKyId }),
+    });
+
+    const summary = res.data?.summary || '';
+    const usedFiles = Array.isArray(res.data?.used_files) ? res.data.used_files : [];
+    const filesHtml = usedFiles.length
+      ? `<div style="margin-top:10px;font-size:12px;color:var(--text3)"><div style="font-weight:700;color:var(--text2);margin-bottom:6px">File đã dùng</div>${usedFiles.map((path) => `<div style="word-break:break-word">${escapeHtml(path)}</div>`).join('')}</div>`
+      : '';
+
+    showModal(`
+      <div class="modal-header">
+        <div class="modal-title">🤖 Tóm tắt AI cho KLTN</div>
+        <button class="modal-close" onclick="closeModalForce()">✕</button>
+      </div>
+      <div class="info-row"><span class="info-label">Đề tài:</span><span class="info-value" style="font-weight:700">${escapeHtml(k.tenDeTai)}</span></div>
+      <div class="info-row"><span class="info-label">Sinh viên:</span><span class="info-value">${escapeHtml(getUser(k.svEmail)?.name || k.svEmail)}</span></div>
+      <div class="info-row"><span class="info-label">Trạng thái:</span><span class="info-value">${statusBadge(k.trangThai)}</span></div>
+      <div class="form-group" style="margin-top:12px">
+        <label>Tóm tắt</label>
+        <textarea readonly rows="14" style="width:100%;background:var(--bg);font-size:13px;line-height:1.6">${escapeForTextarea(summary)}</textarea>
+      </div>
+      ${filesHtml}
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModalForce()">Đóng</button>
+      </div>
+    `);
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 function renderGoiY() {
   const u = DB.currentUser;
   const el = document.getElementById('page-goiy');
