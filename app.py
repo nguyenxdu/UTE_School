@@ -1509,10 +1509,6 @@ def mark_read():
     conn.close()
     return ok("Đã cập nhật trạng thái đọc")
 
-@app.route("/")
-def home():
-    return "UTE School API is running 🚀"
-
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
