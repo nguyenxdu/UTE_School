@@ -26,6 +26,11 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 init_db()
 
+@app.route("/", methods=["GET"])
+def home():
+    # Sử dụng luôn hàm ok() bạn đã viết trong app.py
+    return ok("UTE School API is running mượt mà 🚀")
+
 
 def ok(message="Thành công", data=None, status=200):
     return jsonify({"success": True, "message": message, "data": data or {}}), status
