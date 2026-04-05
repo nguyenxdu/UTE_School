@@ -21,8 +21,8 @@ app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = False
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyBXKIdqFfH3OBbfhGUuiF2V0BxfkcgK4IM").strip()
-GEMINI_MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL_NAME = os.environ.get("GEMINI_MODEL", "").strip()
 _GEMINI_CONFIGURED = False
 
 UPLOAD_FOLDER = "uploads"
@@ -63,6 +63,27 @@ def _configure_gemini():
     genai.configure(api_key=GEMINI_API_KEY)
     _GEMINI_CONFIGURED = True
     return True
+
+
+def _candidate_gemini_models():
+    candidates = []
+    if GEMINI_MODEL_NAME:
+        for name in GEMINI_MODEL_NAME.split(","):
+            model_name = name.strip()
+            if model_name and model_name not in candidates:
+                candidates.append(model_name)
+
+    # Ưu tiên model mới trước, giữ model cũ làm fallback tương thích.
+    defaults = [
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-lite",
+        "gemini-1.5-flash-latest",
+        "gemini-1.5-flash",
+    ]
+    for model_name in defaults:
+        if model_name not in candidates:
+            candidates.append(model_name)
+    return candidates
 
 
 def _read_pdf_text(file_path):
@@ -1552,17 +1573,28 @@ def summarize_report():
     if not _configure_gemini():
         return fail("Thiếu GEMINI_API_KEY trong biến môi trường", 500)
 
-    try:
-        model = genai.GenerativeModel(GEMINI_MODEL_NAME)
-        prompt = _build_gemini_summary_prompt(content)
-        response = model.generate_content(prompt)
-        return ok("Tóm tắt thành công", {
-            "summary": response.text,
-            "used_files": used_paths,
-            "model": GEMINI_MODEL_NAME,
-        })
-    except Exception as e:
-        return fail(f"Lỗi kết nối Gemini: {str(e)}", 500)
+    prompt = _build_gemini_summary_prompt(content)
+    last_error = None
+    for model_name in _candidate_gemini_models():
+        try:
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(prompt)
+            summary_text = (getattr(response, "text", "") or "").strip()
+            if not summary_text:
+                raise RuntimeError("Model trả về nội dung rỗng")
+            return ok("Tóm tắt thành công", {
+                "summary": summary_text,
+                "used_files": used_paths,
+                "model": model_name,
+            })
+        except Exception as e:
+            last_error = e
+
+    return fail(
+        "Lỗi kết nối Gemini: không tìm thấy model phù hợp hoặc model không hỗ trợ generateContent. "
+        f"Lỗi cuối: {str(last_error)}",
+        500,
+    )
 
 
 @app.route("/api/thong-ke", methods=["GET"])
