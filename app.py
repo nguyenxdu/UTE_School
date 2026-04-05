@@ -21,7 +21,7 @@ app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = False
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyBXKIdqFfH3OBbfhGUuiF2V0BxfkcgK4IM").strip()
 GEMINI_MODEL_NAME = os.environ.get("GEMINI_MODEL", "").strip()
 _GEMINI_CONFIGURED = False
 
