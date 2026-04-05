@@ -1,0 +1,16 @@
+{
+  "name": "kltn---copy-(4)---copy",
+  "version": "1.0.0",
+  "description": "Ứng dụng web chạy **toàn bộ trên RAM** (không lưu DB server). Mọi dữ liệu đều được hardcode trong `index.html`.",
+  "main": "gen_bien_ban.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "docx": "^9.6.1"
+  }
+}
