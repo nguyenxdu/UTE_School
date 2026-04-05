@@ -58,11 +58,14 @@ def _configure_gemini():
     global _GEMINI_CONFIGURED
     if _GEMINI_CONFIGURED:
         return True
-    if not GEMINI_API_KEY:
+    try:
+        if GEMINI_API_KEY:
+            genai.configure(api_key=GEMINI_API_KEY)
+        _GEMINI_CONFIGURED = True
+        return True
+    except Exception as e:
+        print(f"[ERROR] Failed to configure Gemini: {str(e)}")
         return False
-    genai.configure(api_key=GEMINI_API_KEY)
-    _GEMINI_CONFIGURED = True
-    return True
 
 
 def _candidate_gemini_models():
@@ -1571,7 +1574,7 @@ def summarize_report():
         used_paths = []
 
     if not _configure_gemini():
-        return fail("Thiếu GEMINI_API_KEY trong biến môi trường", 500)
+        return fail("Lỗi cấu hình Gemini API - Kiểm tra lại GEMINI_API_KEY hoặc kết nối mạng", 500)
 
     prompt = _build_gemini_summary_prompt(content)
     last_error = None
