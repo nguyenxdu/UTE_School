@@ -77,11 +77,12 @@ def _candidate_gemini_models():
                 candidates.append(model_name)
 
     # Ưu tiên model mới trước, giữ model cũ làm fallback tương thích.
+    # Lưu ý: gemini-1.5-flash đã bị deprecated, chỉ dùng gemini-2.0 trở lên
     defaults = [
         "gemini-2.0-flash",
         "gemini-2.0-flash-lite",
-        "gemini-1.5-flash-latest",
-        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+        "gemini-pro",
     ]
     for model_name in defaults:
         if model_name not in candidates:
